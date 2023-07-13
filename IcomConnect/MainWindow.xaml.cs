@@ -4,7 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -23,33 +23,63 @@ namespace IcomConnect
     public partial class MainWindow : Window
     {
 
-        public const string RadioAddress = "192.168.1.12";
-        public const int RadioPortStart = 50001;
+        private TcpClient _tcpClient = null;
+
+        private const string _ipAddrString = "192.168.1.12";
+        private const int _port = 50001;
+
+        private object _lockObject = new object();
+
+        private Thread _readThread = null;
+        private Thread _workThread = null;
+        private ManualResetEvent _doWork = new ManualResetEvent(false);
+
+        private Queue<byte[]> _sendqueue = new Queue<byte[]>();
+
+        private bool _opened = false;
+
+        private Queue<byte[]> _initialqueue = new Queue<byte[]>();
+
+        public bool Open()
+        {
+            lock (_lockObject)
+            {
+                if (_workThread == null)
+                {
+                    _workThread = new Thread(new ThreadStart(WorkThread));
+                    _workThread.Name = "TCP Work thread";
+                    _workThread.IsBackground = true;
+                    _workThread.Start();
+                }
+            }
+            return true;
+        }
+
+
 
         public MainWindow()
         {
 
             InitializeComponent();
 
-            UdpClient udpClient = new UdpClient(RadioPortStart);
+            UdpClient udpClientControl = new UdpClient(_ipAddrString, _port);
+            //UdpClient udpClientCIV = new UdpClient(RadioPortStart + 1);
             try
             {
-                udpClient.Connect(RadioAddress, RadioPortStart);
-
                 // Sends a message to the host to which you have connected.
                 byte[] sendBytes = Encoding.ASCII.GetBytes("Is anybody there?");
 
-                udpClient.Send(sendBytes, sendBytes.Length);
+                udpClientControl.Send(sendBytes, sendBytes.Length);
 
                 // Sends a message to a different host using optional hostname and port parameters.
-                UdpClient udpClientB = new UdpClient();
-                udpClientB.Send(sendBytes, sendBytes.Length, "AlternateHostMachineName", 11000);
+                //UdpClient udpClientB = new UdpClient();
+                //udpClientB.Send(sendBytes, sendBytes.Length, "AlternateHostMachineName", 11000);
 
                 //IPEndPoint object will allow us to read datagrams sent from any source.
                 IPEndPoint RemoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
 
                 // Blocks until a message returns on this socket from a remote host.
-                byte[] receiveBytes = udpClient.Receive(ref RemoteIpEndPoint);
+                byte[] receiveBytes = udpClientControl.Receive(ref RemoteIpEndPoint);
                 string returnData = Encoding.ASCII.GetString(receiveBytes);
 
                 // Uses the IPEndPoint object to determine which of these two hosts responded.
@@ -60,8 +90,7 @@ namespace IcomConnect
                                             " on their port number " +
                                             RemoteIpEndPoint.Port.ToString());
 
-                udpClient.Close();
-                udpClientB.Close();
+                udpClientControl.Close();
             }
             catch (Exception e)
             {
